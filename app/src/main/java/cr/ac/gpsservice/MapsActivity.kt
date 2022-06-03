@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
 
@@ -18,13 +19,18 @@ import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
+import com.google.maps.android.PolyUtil
+import com.google.maps.android.data.geojson.GeoJsonLayer
+import com.google.maps.android.data.geojson.GeoJsonPolygon
 import cr.ac.gpsservice.databinding.ActivityMapsBinding
 import cr.ac.gpsservice.db.LocationDatabase
 import cr.ac.gpsservice.entity.Location
 import cr.ac.gpsservice.service.GpsService
+import org.json.JSONObject
 
 private lateinit var mMap: GoogleMap
 private lateinit var locationDatabase: LocationDatabase
+private lateinit var layer: GeoJsonLayer
 
 class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -43,7 +49,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
             .findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
-        locationDatabase=LocationDatabase.getInstance(this)
+        locationDatabase = LocationDatabase.getInstance(this)
         validaPermisos()
     }
 
@@ -51,16 +57,17 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
         iniciaServicio()
-
+        definePoligono(googleMap)
         recuperarPuntos(mMap)
 
     }
+
     /**
      * Obtener los puntos almacenados en la bd y mostrarlos en el mapa
      */
-    fun recuperarPuntos(googleMap:GoogleMap){
+    fun recuperarPuntos(googleMap: GoogleMap) {
         mMap = googleMap
-        for(location in locationDatabase.locationDao.query()){
+        for (location in locationDatabase.locationDao.query()) {
             val costaRica = LatLng(location.latitude, location.longitude)
             mMap.addMarker(MarkerOptions().position(costaRica).title("Marker in Costa Rica"))
         }
@@ -73,19 +80,19 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
      * E inicia el servicio(starService) GpsService
      */
 
-    fun iniciaServicio(){
-        val filter= IntentFilter()
+    fun iniciaServicio() {
+        val filter = IntentFilter()
         filter.addAction(GpsService.GPS)
-        val rcv=ProgressReceiver()
-        registerReceiver(rcv,filter)
-        startService(Intent(this,GpsService::class.java))
+        val rcv = ProgressReceiver()
+        registerReceiver(rcv, filter)
+        startService(Intent(this, GpsService::class.java))
     }
 
     /**
      *Valida si la app tiene permisos de ACCESS_FINE_LOCATION y ACCESS_COARSE_LOCATION
      * si no tiene permisos solicita al usuario permisos(requestPermission)
      */
-    fun validaPermisos(){
+    fun validaPermisos() {
         if (ActivityCompat.checkSelfPermission(
                 this,
                 android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -108,6 +115,55 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
 
+
+    fun definePoligono(googleMap: GoogleMap) {
+        val geoJsonData = JSONObject(
+            "{\n" +
+                    "  \"type\": \"FeatureCollection\",\n" +
+                    "  \"features\": [\n" +
+                    "    {\n" +
+                    "      \"type\": \"Feature\",\n" +
+                    "      \"properties\": {},\n" +
+                    "      \"geometry\": {\n" +
+                    "        \"type\": \"Polygon\",\n" +
+                    "        \"coordinates\": [\n" +
+                    "          [\n" +
+                    "            [\n" +
+                    "              -83.86962890625,\n" +
+                    "              9.817329187067783\n" +
+                    "            ],\n" +
+                    "            [\n" +
+                    "              -77.95898437499999,\n" +
+                    "              8.146242825034385\n" +
+                    "            ],\n" +
+                    "            [\n" +
+                    "              -74.267578125,\n" +
+                    "              40.713955826286046\n" +
+                    "            ],\n" +
+                    "            [\n" +
+                    "              -82.265625,\n" +
+                    "              27.137368359795584\n" +
+                    "            ],\n" +
+                    "            [\n" +
+                    "              -87.1875,\n" +
+                    "              21.04349121680354\n" +
+                    "            ],\n" +
+                    "            [\n" +
+                    "              -83.86962890625,\n" +
+                    "              9.817329187067783\n" +
+                    "            ]\n" +
+                    "          ]\n" +
+                    "        ]\n" +
+                    "      }\n" +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}"
+        )
+        layer = GeoJsonLayer(googleMap, geoJsonData)
+        layer.addLayerToMap()
+    }
+
+
     /**
      * validar que se le dieron los permisos a la app, en caso contrario salir
      */
@@ -120,7 +176,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     ) {
         when (requestCode) {
             SOLICITAR_GPS -> {
-                if ( grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
 
                     System.exit(1)
                 }
@@ -134,22 +190,34 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     /**
      * es la clase para recibir los mensajes de broadcast
      */
-    class ProgressReceiver:BroadcastReceiver(){
+    class ProgressReceiver : BroadcastReceiver() {
         /**
          * se obtiene el parametro enviado por el servicio (Location)
          * Coloca en el mapa la localizacion
          * Mueve la camara a esa localizacion
          */
+        fun getPolygon(layer: GeoJsonLayer): GeoJsonPolygon? {
+            for (feature in layer.features) {
+                return feature.geometry as GeoJsonPolygon
+            }
+            return null
+        }
+
         override fun onReceive(p0: Context, p1: Intent) {
-            if(p1.action==GpsService.GPS){
-                val localizacion:Location=
+            if (p1.action == GpsService.GPS) {
+                val localizacion: Location =
                     p1.getSerializableExtra("localizacion") as Location
-                val punto=LatLng(localizacion.latitude,localizacion.longitude)
+                val punto = LatLng(localizacion.latitude, localizacion.longitude)
                 mMap.addMarker(MarkerOptions().position(punto).title("Marker in Costa Rica"))
                 mMap.moveCamera(CameraUpdateFactory.newLatLng(punto))
 
+                if(PolyUtil.containsLocation(localizacion.latitude, localizacion.longitude, getPolygon(layer)!!.outerBoundaryCoordinates, false)){
+                    Toast.makeText(p0,"Si esta en el punto",Toast.LENGTH_SHORT).show()
+                }
+                else{
+                    Toast.makeText(p0,"No esta en el punto",Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
-
 }
